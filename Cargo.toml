@@ -1,0 +1,27 @@
+[package]
+name = "ciri"
+version = "0.1.0"
+edition = "2021"
+description = "Local-LLM powered CLI for common dev tasks"
+authors = ["Samuel Norris <sampnorris@gmail.com>"]
+
+[[bin]]
+name = "ciri"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "process", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+anyhow = "1"
+indicatif = "0.17"
+termimad = "0.31"
+crossterm = "0.28"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

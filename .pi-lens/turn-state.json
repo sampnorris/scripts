@@ -3,6 +3,10 @@
     "commit.ts": {
       "modifiedRanges": [
         {
+          "start": 12,
+          "end": 13
+        },
+        {
           "start": 27,
           "end": 29
         },
@@ -12,23 +16,15 @@
         },
         {
           "start": 54,
-          "end": 54
+          "end": 55
         },
         {
-          "start": 60,
-          "end": 61
-        },
-        {
-          "start": 69,
-          "end": 70
-        },
-        {
-          "start": 74,
+          "start": 57,
           "end": 99
         }
       ],
-      "importsChanged": false,
-      "lastEdit": "2026-04-17T21:07:46.069Z"
+      "importsChanged": true,
+      "lastEdit": "2026-04-17T21:18:09.405Z"
     },
     "pr.ts": {
       "modifiedRanges": [
@@ -38,10 +34,70 @@
         }
       ],
       "importsChanged": true,
-      "lastEdit": "2026-04-17T21:11:59.236Z"
+      "lastEdit": "2026-04-17T21:18:29.555Z"
+    },
+    "src/main.rs": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 45
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-04-17T21:26:15.200Z"
+    },
+    "src/git.rs": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 47
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-04-17T21:26:40.769Z"
+    },
+    "src/ollama.rs": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 109
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-04-17T21:26:48.254Z"
+    },
+    "src/ui.rs": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 34
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-04-17T21:26:42.344Z"
+    },
+    "src/commands/commit.rs": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 85
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-04-17T21:26:43.015Z"
+    },
+    "src/commands/pr.rs": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 139
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-04-17T21:26:43.725Z"
     }
   },
   "turnCycles": 0,
   "maxCycles": 3,
-  "lastUpdated": "2026-04-17T21:11:59.236Z"
+  "lastUpdated": "2026-04-17T21:26:48.254Z"
 }
