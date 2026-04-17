@@ -1,1 +1,0 @@
-/Users/samuel/.scripts/target/release/ciri: /Users/samuel/.scripts/src/commands/commit.rs /Users/samuel/.scripts/src/commands/pr.rs /Users/samuel/.scripts/src/git.rs /Users/samuel/.scripts/src/main.rs /Users/samuel/.scripts/src/ollama.rs /Users/samuel/.scripts/src/ui.rs
