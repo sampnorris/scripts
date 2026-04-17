@@ -3,31 +3,32 @@
 //! Everything in here is deterministic and side-effect free so it can be
 //! exercised from unit tests without spawning subprocesses or the network.
 
-pub const COMMIT_SYSTEM: &str = "You write Conventional Commit messages prefixed with a gitmoji.\n\
-Format: <emoji> <type>(<optional scope>): <subject>\n\n\
-Gitmoji → type mapping (pick the single best fit):\n\
-- ✨ feat      — new feature\n\
-- 🐛 fix       — bug fix\n\
-- 📝 docs      — documentation only\n\
-- 🎨 style     — formatting / whitespace / no code change\n\
-- ♻️  refactor  — code change that neither fixes a bug nor adds a feature\n\
-- ⚡️  perf      — performance improvement\n\
-- ✅ test      — adding or fixing tests\n\
-- 👷 build     — build system / dependencies\n\
-- 💚 ci        — CI configuration\n\
-- 🔧 chore     — tooling / maintenance\n\
-- ⏪️  revert    — revert a previous commit\n\
-- 🔥 (remove)  — removing code/files (use with refactor/chore)\n\
-- 🔒 (security)— security fix (use with fix)\n\n\
+pub const COMMIT_SYSTEM: &str = "You write Conventional Commit messages with a trailing gitmoji before the subject.\n\
+Format: <type>(<optional scope>): <emoji> <subject>\n\n\
+Type → gitmoji mapping (pick the single best fit):\n\
+- feat     → ✨ — new feature\n\
+- fix      → 🐛 — bug fix\n\
+- docs     → 📝 — documentation only\n\
+- style    → 🎨 — formatting / whitespace / no code change\n\
+- refactor → ♻️  — code change that neither fixes a bug nor adds a feature\n\
+- perf     → ⚡️  — performance improvement\n\
+- test     → ✅ — adding or fixing tests\n\
+- build    → 👷 — build system / dependencies\n\
+- ci       → 💚 — CI configuration\n\
+- chore    → 🔧 — tooling / maintenance\n\
+- revert   → ⏪️  — revert a previous commit\n\
+- remove   → 🔥 — use with refactor/chore when deleting code/files\n\
+- security → 🔒 — use with fix for security fixes\n\n\
 Rules:\n\
-- Start with exactly one gitmoji emoji, then a single space, then the conventional commit.\n\
-- Subject: imperative mood, lowercase, no trailing period, <= 72 chars (including emoji).\n\
+- Start with the conventional type (and optional scope), then a colon + space, then exactly one gitmoji, then a single space, then the subject.\n\
+- Subject: imperative mood, lowercase, no trailing period, <= 72 chars total (including type, emoji, etc.).\n\
 - Optionally add a blank line then a short body explaining the \"why\" (wrap at 72).\n\
 - Output ONLY the commit message. No markdown, no code fences, no commentary.\n\n\
 Examples:\n\
-✨ feat(pr): detect and update existing PRs\n\
-🐛 fix(commit): handle empty diff without panicking\n\
-✅ test: cover dry-run and no-add flag paths";
+feat(pr): ✨ detect and update existing PRs\n\
+fix(commit): 🐛 handle empty diff without panicking\n\
+test: ✅ cover dry-run and no-add flag paths\n\
+chore: 🔧 bump clap to 4.5";
 
 pub const PR_SYSTEM: &str = "You write concise, helpful GitHub pull request descriptions.\n\
 Output format (markdown):\n  \
@@ -169,12 +170,16 @@ mod tests {
     }
 
     #[test]
-    fn commit_system_prompt_requires_gitmoji() {
-        // Spec: the commit system prompt tells the model to lead with a gitmoji.
+    fn commit_system_prompt_places_gitmoji_after_conventional_prefix() {
+        // Spec: gitmoji sits AFTER the conventional commit `type(scope):` prefix,
+        // not before it. i.e. `feat: ✨ ...`, not `✨ feat: ...`.
         assert!(COMMIT_SYSTEM.contains("gitmoji"));
-        assert!(COMMIT_SYSTEM.contains("✨ feat"));
-        assert!(COMMIT_SYSTEM.contains("🐛 fix"));
-        assert!(COMMIT_SYSTEM.contains("<emoji> <type>"));
+        assert!(COMMIT_SYSTEM.contains("<type>(<optional scope>): <emoji> <subject>"));
+        assert!(COMMIT_SYSTEM.contains("feat     → ✨"));
+        assert!(COMMIT_SYSTEM.contains("fix      → 🐛"));
+        // And the examples match the format
+        assert!(COMMIT_SYSTEM.contains("feat(pr): ✨"));
+        assert!(COMMIT_SYSTEM.contains("fix(commit): 🐛"));
     }
 
     #[test]
