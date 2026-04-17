@@ -82,5 +82,6 @@ Rules:\n\
     }
 
     git::run_inherit(&["commit", "-m", &message]).await?;
+    ui::render_markdown("\n**✅ committed**\n");
     Ok(())
 }
