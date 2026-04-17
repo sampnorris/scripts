@@ -3,10 +3,11 @@ use clap::Args as ClapArgs;
 use tokio::io::{stdout, AsyncWriteExt};
 
 use crate::git;
-use crate::ollama::{chat_stream, ChatMessage};
+use crate::llm::{select, Message, Mode};
 use crate::ui;
 
-const DEFAULT_MODEL: &str = "gemma4:e2b";
+/// Default Ollama model when offline.
+const OFFLINE_MODEL: &str = "gemma4:e2b";
 const MAX_DIFF: usize = 12_000;
 
 #[derive(ClapArgs)]
@@ -20,9 +21,7 @@ pub struct Args {
     no_add: bool,
 }
 
-pub async fn run(args: Args, host: &str, model: Option<&str>) -> Result<()> {
-    let model = model.unwrap_or(DEFAULT_MODEL);
-
+pub async fn run(args: Args, host: &str, model: Option<&str>, mode: Mode) -> Result<()> {
     git::ensure_repo().await?;
 
     if !args.no_add {
@@ -55,17 +54,20 @@ Rules:\n\
     );
 
     let messages = vec![
-        ChatMessage { role: "system", content: system },
-        ChatMessage { role: "user", content: &user },
+        Message { role: "system", content: system },
+        Message { role: "user", content: &user },
     ];
 
-    let sp = ui::spinner(format!("Generating commit message with {model}"));
+    let provider = select(mode, host, OFFLINE_MODEL, model).await;
+    let sp = ui::spinner(format!("Generating commit message via {}", provider.label));
+
     let mut out = stdout();
     let sp_for_clear = sp.clone();
-    let content = chat_stream(host, model, &messages, 0.2, &mut out, move || {
-        sp_for_clear.finish_and_clear();
-    })
-    .await?;
+    let mut on_first = move || sp_for_clear.finish_and_clear();
+    let content = provider
+        .llm
+        .chat(&messages, 0.2, &mut out, &mut on_first)
+        .await?;
     sp.finish_and_clear();
     out.write_all(b"\n").await?;
     out.flush().await?;
