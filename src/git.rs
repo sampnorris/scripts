@@ -1,8 +1,18 @@
 use anyhow::{anyhow, Result};
+use std::path::Path;
 use tokio::process::Command;
 
 pub async fn run(args: &[&str]) -> Result<String> {
-    let out = Command::new("git").args(args).output().await?;
+    run_in(None::<&Path>, args).await
+}
+
+pub async fn run_in<P: AsRef<Path>>(cwd: Option<P>, args: &[&str]) -> Result<String> {
+    let mut cmd = Command::new("git");
+    cmd.args(args);
+    if let Some(p) = cwd {
+        cmd.current_dir(p);
+    }
+    let out = cmd.output().await?;
     if !out.status.success() {
         return Err(anyhow!(
             "git {:?} failed: {}",
@@ -31,13 +41,25 @@ pub async fn current_branch() -> Result<String> {
 }
 
 pub async fn detect_base() -> String {
-    if let Ok(h) = run(&["symbolic-ref", "refs/remotes/origin/HEAD"]).await {
+    detect_base_in(None::<&Path>).await
+}
+
+pub async fn detect_base_in<P: AsRef<Path> + Clone>(cwd: Option<P>) -> String {
+    if let Ok(h) = run_in(cwd.clone(), &["symbolic-ref", "refs/remotes/origin/HEAD"]).await {
         return h.replace("refs/remotes/origin/", "");
     }
     for b in ["main", "master"] {
-        if run(&["show-ref", "--verify", "--quiet", &format!("refs/remotes/origin/{b}")])
-            .await
-            .is_ok()
+        if run_in(
+            cwd.clone(),
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/remotes/origin/{b}"),
+            ],
+        )
+        .await
+        .is_ok()
         {
             return b.to_string();
         }

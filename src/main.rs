@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod git;
 mod llm;
+mod prompts;
 mod ui;
 
 mod commands {

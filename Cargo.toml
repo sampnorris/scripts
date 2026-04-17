@@ -22,6 +22,9 @@ indicatif = "0.17"
 termimad = "0.31"
 crossterm = "0.28"
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

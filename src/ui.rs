@@ -49,16 +49,3 @@ pub fn render_markdown(md: &str) {
 
     skin.print_text(md);
 }
-
-/// Strip leading/trailing markdown code fences if the model wrapped its answer.
-pub fn strip_fences(s: &str) -> String {
-    let t = s.trim();
-    let t = t
-        .strip_prefix("```markdown")
-        .or_else(|| t.strip_prefix("```md"))
-        .or_else(|| t.strip_prefix("```"))
-        .unwrap_or(t);
-    let t = t.trim_start_matches('\n');
-    let t = t.strip_suffix("```").unwrap_or(t);
-    t.trim().to_string()
-}

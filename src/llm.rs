@@ -101,7 +101,10 @@ impl Llm for Ollama {
             model: &self.model,
             messages: messages
                 .iter()
-                .map(|m| OllamaMsg { role: m.role, content: m.content })
+                .map(|m| OllamaMsg {
+                    role: m.role,
+                    content: m.content,
+                })
                 .collect(),
             stream: true,
             options: OllamaOpts { temperature },
@@ -258,8 +261,17 @@ impl Llm for Pi {
 
 // ---------------- Selection ----------------
 
+/// Pure decision: given the mode + connectivity probe, should we use the online backend?
+pub fn resolve_use_online(mode: Mode, probe_online: bool) -> bool {
+    match mode {
+        Mode::ForceOnline => true,
+        Mode::ForceOffline => false,
+        Mode::Auto => probe_online,
+    }
+}
+
 pub async fn is_online() -> bool {
-    // Env overrides
+    // Env overrides (useful for tests and `CI`-ish environments)
     if std::env::var("CIRI_OFFLINE").ok().as_deref() == Some("1") {
         return false;
     }
@@ -293,11 +305,7 @@ pub async fn select(
     offline_model: &str,
     model_override: Option<&str>,
 ) -> ProviderChoice {
-    let use_online = match mode {
-        Mode::ForceOnline => true,
-        Mode::ForceOffline => false,
-        Mode::Auto => is_online().await,
-    };
+    let use_online = resolve_use_online(mode, is_online().await);
 
     if use_online {
         let pi = Pi {
@@ -319,5 +327,41 @@ pub async fn select(
             label,
             llm: Box::new(ollama),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn force_online_wins() {
+        assert!(resolve_use_online(Mode::ForceOnline, false));
+    }
+    #[test]
+    fn force_offline_wins() {
+        assert!(!resolve_use_online(Mode::ForceOffline, true));
+    }
+    #[test]
+    fn auto_follows_probe() {
+        assert!(resolve_use_online(Mode::Auto, true));
+        assert!(!resolve_use_online(Mode::Auto, false));
+    }
+
+    #[test]
+    fn offline_selection_uses_ollama_with_override() {
+        let ollama = Ollama {
+            host: "http://x".into(),
+            model: "gemma4:e2b".into(),
+        };
+        assert_eq!(ollama.name(), "ollama:gemma4:e2b");
+    }
+
+    #[test]
+    fn online_selection_uses_pi_defaults() {
+        let pi = Pi::default();
+        assert_eq!(pi.provider, "openai-codex");
+        assert_eq!(pi.model, "gpt-5.4-mini");
+        assert_eq!(pi.name(), "pi:openai-codex/gpt-5.4-mini");
     }
 }

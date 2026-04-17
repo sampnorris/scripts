@@ -6,6 +6,7 @@ use tokio::process::Command;
 
 use crate::git;
 use crate::llm::{select, Message, Mode};
+use crate::prompts::{pr_user_prompt, split_title_body, truncate_diff, PR_SYSTEM};
 use crate::ui;
 
 const OFFLINE_MODEL: &str = "gemma4:e2b";
@@ -46,7 +47,9 @@ pub async fn run(args: Args, host: &str, model: Option<&str>, mode: Mode) -> Res
     };
     let branch = git::current_branch().await?;
     if branch == base {
-        return Err(anyhow!("On base branch '{base}'. Checkout a feature branch."));
+        return Err(anyhow!(
+            "On base branch '{base}'. Checkout a feature branch."
+        ));
     }
 
     let fetch_sp = ui::spinner(format!("Fetching origin/{base}"));
@@ -61,43 +64,25 @@ pub async fn run(args: Args, host: &str, model: Option<&str>, mode: Mode) -> Res
     ])
     .await?;
     if commits.is_empty() {
-        return Err(anyhow!(
-            "No commits on '{branch}' ahead of origin/{base}."
-        ));
+        return Err(anyhow!("No commits on '{branch}' ahead of origin/{base}."));
     }
     let diff_stat = git::run(&["diff", "--stat", &format!("{merge_base}..HEAD")]).await?;
     let diff = git::run(&["diff", &format!("{merge_base}..HEAD")]).await?;
-    let truncated_diff = if diff.len() > MAX_DIFF {
-        format!("{}\n...[truncated]", &diff[..MAX_DIFF])
-    } else {
-        diff
-    };
+    let (truncated_diff, _) = truncate_diff(&diff, MAX_DIFF);
 
     // Detect an existing PR for this branch
     let existing = find_existing_pr(&branch).await?;
 
-    let system = "You write concise, helpful GitHub pull request descriptions.\n\
-Output format (markdown):\n  \
-<short imperative title on a single line, <= 72 chars, no trailing period>\n  \
-<blank line>\n  \
-## Summary\n  \
-- bullet points of what changed and why\n  \
-## Changes\n  \
-- key file/area level changes\n  \
-## Notes\n  \
-- optional: testing, risks, follow-ups (omit section if nothing to say)\n\n\
-Rules:\n\
-- Title first line only. No \"#\", no quotes, no prefix like \"PR:\".\n\
-- Then blank line, then body in markdown.\n\
-- No code fences around the whole thing. No commentary.";
-
-    let user = format!(
-        "Branch: {branch} -> {base}\n\nCommits:\n{commits}\n\nDiff stat:\n{diff_stat}\n\nDiff:\n{truncated_diff}\n\nWrite the PR title and body."
-    );
-
+    let user = pr_user_prompt(&branch, &base, &commits, &diff_stat, &truncated_diff);
     let messages = vec![
-        Message { role: "system", content: system },
-        Message { role: "user", content: &user },
+        Message {
+            role: "system",
+            content: PR_SYSTEM,
+        },
+        Message {
+            role: "user",
+            content: &user,
+        },
     ];
 
     let provider = select(mode, host, OFFLINE_MODEL, model).await;
@@ -111,16 +96,7 @@ Rules:\n\
     sp.finish_and_clear();
     silent.flush().await.ok();
 
-    let cleaned = ui::strip_fences(&content);
-    let mut lines = cleaned.splitn(2, '\n');
-    let title = lines
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches('#')
-        .trim()
-        .to_string();
-    let body = lines.next().unwrap_or("").trim().to_string();
+    let (title, body) = split_title_body(&content);
 
     if title.is_empty() {
         return Err(anyhow!("Model returned empty title."));

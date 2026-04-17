@@ -4,6 +4,7 @@ use tokio::io::{stdout, AsyncWriteExt};
 
 use crate::git;
 use crate::llm::{select, Message, Mode};
+use crate::prompts::{commit_user_prompt, strip_fences, truncate_diff, COMMIT_SYSTEM};
 use crate::ui;
 
 /// Default Ollama model when offline.
@@ -34,28 +35,18 @@ pub async fn run(args: Args, host: &str, model: Option<&str>, mode: Mode) -> Res
     }
     let status = git::run(&["diff", "--staged", "--name-status"]).await?;
 
-    let truncated_diff = if diff.len() > MAX_DIFF {
-        format!("{}\n...[truncated]", &diff[..MAX_DIFF])
-    } else {
-        diff
-    };
-
-    let system = "You write Conventional Commit messages.\n\
-Rules:\n\
-- Format: <type>(<optional scope>): <subject>\n\
-- Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n\
-- Subject: imperative mood, lowercase, no trailing period, <= 72 chars\n\
-- Optionally add a blank line then a short body explaining the \"why\" (wrap at 72)\n\
-- Output ONLY the commit message. No markdown, no code fences, no commentary.";
-
-    let user = format!(
-        "Files changed:\n{}\n\nDiff:\n{}\n\nWrite the commit message.",
-        status, truncated_diff
-    );
+    let (truncated_diff, _) = truncate_diff(&diff, MAX_DIFF);
+    let user = commit_user_prompt(&status, &truncated_diff);
 
     let messages = vec![
-        Message { role: "system", content: system },
-        Message { role: "user", content: &user },
+        Message {
+            role: "system",
+            content: COMMIT_SYSTEM,
+        },
+        Message {
+            role: "user",
+            content: &user,
+        },
     ];
 
     let provider = select(mode, host, OFFLINE_MODEL, model).await;
@@ -72,7 +63,7 @@ Rules:\n\
     out.write_all(b"\n").await?;
     out.flush().await?;
 
-    let message = ui::strip_fences(&content);
+    let message = strip_fences(&content);
     if message.is_empty() {
         return Err(anyhow!("Model returned empty message."));
     }
