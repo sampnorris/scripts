@@ -1,23 +1,21 @@
 //! LLM provider abstraction.
 //!
 //! Two backends:
-//! - `Ollama` — local, always available when `ollama serve` is running.
-//! - `Pi`     — online via the `pi` CLI (OpenAI Codex / gpt-5.4-mini by default).
+//! - `Ollama`    — local, always available when `ollama serve` is running.
+//! - `OpenCode`  — online via the OpenCode server HTTP API (http://localhost:3456).
 //!
 //! Selection order (unless forced via `Mode`):
 //! 1. If `CIRI_OFFLINE=1` → force Ollama.
-//! 2. If `CIRI_ONLINE=1`  → force Pi.
-//! 3. Quick TCP probe to the internet (1.1.1.1:443, 300ms). Online → Pi, offline → Ollama.
+//! 2. If `CIRI_ONLINE=1`  → force OpenCode.
+//! 3. Quick TCP probe to localhost:3456. Running → OpenCode, not running → Ollama.
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::process::Command;
 use tokio::time::timeout;
 
 pub struct Message<'a> {
@@ -157,26 +155,34 @@ impl Llm for Ollama {
     }
 }
 
-// ---------------- pi CLI ----------------
+// ---------------- OpenCode ----------------
 
-pub struct Pi {
-    pub provider: String,
-    pub model: String,
+pub struct OpenCode {
+    pub host: String,
 }
 
-impl Default for Pi {
+impl Default for OpenCode {
     fn default() -> Self {
         Self {
-            provider: "openai-codex".into(),
-            model: "gpt-5.4-mini".into(),
+            host: "http://localhost:3456".into(),
         }
     }
 }
 
+#[derive(Deserialize)]
+struct CreateSessionResp {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct MessageResp {
+    parts: Vec<serde_json::Value>,
+}
+
 #[async_trait]
-impl Llm for Pi {
+impl Llm for OpenCode {
     fn name(&self) -> String {
-        format!("pi:{}/{}", self.provider, self.model)
+        "opencode".to_string()
     }
 
     async fn chat(
@@ -186,7 +192,8 @@ impl Llm for Pi {
         sink: &mut (dyn AsyncWrite + Unpin + Send),
         on_first_token: &mut (dyn FnMut() + Send),
     ) -> Result<String> {
-        // Split messages into a system prompt (concatenated) and a single user prompt.
+        let client = reqwest::Client::new();
+
         let mut system = String::new();
         let mut user = String::new();
         for m in messages {
@@ -206,55 +213,69 @@ impl Llm for Pi {
             }
         }
 
-        let mut cmd = Command::new("pi");
-        cmd.args([
-            "-p",
-            "--provider",
-            &self.provider,
-            "--model",
-            &self.model,
-            "--no-tools",
-            "--no-extensions",
-            "--no-session",
-            "--no-skills",
-            "--no-prompt-templates",
-        ]);
-        if !system.is_empty() {
-            cmd.arg("--system-prompt").arg(&system);
+        let create_url = format!("{}/session", self.host.trim_end_matches('/'));
+        let create_resp = client
+            .post(&create_url)
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .map_err(|e| anyhow!("OpenCode create session: {e}"))?;
+        if !create_resp.status().is_success() {
+            let s = create_resp.status();
+            let t = create_resp.text().await.unwrap_or_default();
+            return Err(anyhow!("OpenCode create session error {s}: {t}"));
         }
-        cmd.arg(&user);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let sess: CreateSessionResp = create_resp
+            .json()
+            .await
+            .map_err(|e| anyhow!("OpenCode create session parse: {e}"))?;
+        let session_id = sess.id;
 
-        let mut child = cmd.spawn().map_err(|e| anyhow!("spawn pi: {e}"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
-        let mut reader = BufReader::new(stdout);
+        let msg_url = format!(
+            "{}/session/{}/message",
+            self.host.trim_end_matches('/'),
+            session_id
+        );
+        let body = serde_json::json!({
+            "system": system,
+            "parts": [{ "type": "text", "text": user }]
+        });
+        let msg_result = client.post(&msg_url).json(&body).send().await;
+
+        let delete_url = format!(
+            "{}/session/{}",
+            self.host.trim_end_matches('/'),
+            session_id
+        );
+        let _ = client.delete(&delete_url).send().await;
+
+        let msg_resp = msg_result.map_err(|e| anyhow!("OpenCode message: {e}"))?;
+        if !msg_resp.status().is_success() {
+            let s = msg_resp.status();
+            let t = msg_resp.text().await.unwrap_or_default();
+            return Err(anyhow!("OpenCode message error {s}: {t}"));
+        }
+        let parsed: MessageResp = msg_resp
+            .json()
+            .await
+            .map_err(|e| anyhow!("OpenCode message parse: {e}"))?;
 
         let mut out = String::new();
-        let mut buf = [0u8; 1024];
-        let mut started = false;
-        use tokio::io::AsyncReadExt;
-        loop {
-            let n = reader.read(&mut buf).await?;
-            if n == 0 {
-                break;
+        for part in &parsed.parts {
+            if part.get("type").and_then(|v| v.as_str()) == Some("text") {
+                if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                    out.push_str(text);
+                }
             }
-            if !started {
-                on_first_token();
-                started = true;
-            }
-            sink.write_all(&buf[..n]).await?;
-            sink.flush().await?;
-            out.push_str(&String::from_utf8_lossy(&buf[..n]));
         }
 
-        let status = child.wait().await?;
-        if !status.success() {
-            let mut stderr = String::new();
-            if let Some(mut e) = child.stderr.take() {
-                e.read_to_string(&mut stderr).await.ok();
-            }
-            return Err(anyhow!("pi failed: {stderr}"));
+        if out.is_empty() {
+            return Err(anyhow!("OpenCode returned no text parts in response"));
         }
+
+        on_first_token();
+        sink.write_all(out.as_bytes()).await?;
+        sink.flush().await?;
         Ok(out)
     }
 }
@@ -271,29 +292,22 @@ pub fn resolve_use_online(mode: Mode, probe_online: bool) -> bool {
 }
 
 pub async fn is_online() -> bool {
-    // Env overrides (useful for tests and `CI`-ish environments)
     if std::env::var("CIRI_OFFLINE").ok().as_deref() == Some("1") {
         return false;
     }
     if std::env::var("CIRI_ONLINE").ok().as_deref() == Some("1") {
         return true;
     }
-    // Fast TCP probe: prefer the pi backend host, fall back to a well-known IP.
-    for addr in ["api.openai.com:443", "1.1.1.1:443"] {
-        if timeout(Duration::from_millis(400), TcpStream::connect(addr))
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .is_some()
-        {
-            return true;
-        }
-    }
-    false
+    // Fast TCP probe: check if the OpenCode server is running locally.
+    timeout(Duration::from_millis(400), TcpStream::connect("127.0.0.1:3456"))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .is_some()
 }
 
 pub struct ProviderChoice {
-    /// User-facing label, e.g. "ollama:gemma4:e2b" or "pi:openai-codex/gpt-5.4-mini".
+    /// User-facing label, e.g. "ollama:gemma4:e2b" or "opencode".
     pub label: String,
     pub llm: Box<dyn Llm>,
 }
@@ -308,14 +322,11 @@ pub async fn select(
     let use_online = resolve_use_online(mode, is_online().await);
 
     if use_online {
-        let pi = Pi {
-            model: model_override.unwrap_or("gpt-5.4-mini").to_string(),
-            ..Pi::default()
-        };
-        let label = pi.name();
+        let oc = OpenCode::default();
+        let label = oc.name();
         ProviderChoice {
             label,
-            llm: Box::new(pi),
+            llm: Box::new(oc),
         }
     } else {
         let ollama = Ollama {
@@ -358,10 +369,9 @@ mod tests {
     }
 
     #[test]
-    fn online_selection_uses_pi_defaults() {
-        let pi = Pi::default();
-        assert_eq!(pi.provider, "openai-codex");
-        assert_eq!(pi.model, "gpt-5.4-mini");
-        assert_eq!(pi.name(), "pi:openai-codex/gpt-5.4-mini");
+    fn online_selection_uses_opencode_defaults() {
+        let opencode = OpenCode::default();
+        assert_eq!(opencode.host, "http://localhost:3456");
+        assert_eq!(opencode.name(), "opencode");
     }
 }

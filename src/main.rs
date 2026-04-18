@@ -32,7 +32,7 @@ struct Cli {
     #[arg(long, global = true, conflicts_with = "online")]
     offline: bool,
 
-    /// Force the online (pi / OpenAI Codex) backend.
+    /// Force the online (OpenCode server) backend.
     #[arg(long, global = true)]
     online: bool,
 }
