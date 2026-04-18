@@ -242,11 +242,7 @@ impl Llm for OpenCode {
         });
         let msg_result = client.post(&msg_url).json(&body).send().await;
 
-        let delete_url = format!(
-            "{}/session/{}",
-            self.host.trim_end_matches('/'),
-            session_id
-        );
+        let delete_url = format!("{}/session/{}", self.host.trim_end_matches('/'), session_id);
         let _ = client.delete(&delete_url).send().await;
 
         let msg_resp = msg_result.map_err(|e| anyhow!("OpenCode message: {e}"))?;
@@ -299,11 +295,14 @@ pub async fn is_online() -> bool {
         return true;
     }
     // Fast TCP probe: check if the OpenCode server is running locally.
-    timeout(Duration::from_millis(400), TcpStream::connect("127.0.0.1:3456"))
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .is_some()
+    timeout(
+        Duration::from_millis(400),
+        TcpStream::connect("127.0.0.1:3456"),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .is_some()
 }
 
 pub struct ProviderChoice {
